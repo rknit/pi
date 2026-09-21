@@ -438,6 +438,10 @@ export class ExtensionRunner {
 		this.mode = mode;
 	}
 
+	setCwd(cwd: string): void {
+		this.cwd = cwd;
+	}
+
 	private wrapUIPromptContext(ui: ExtensionUIContext): ExtensionUIContext {
 		return {
 			...ui,

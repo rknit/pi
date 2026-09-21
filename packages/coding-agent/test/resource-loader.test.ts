@@ -1,10 +1,11 @@
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ExtensionRunner } from "../src/core/extensions/runner.ts";
+import { collectAncestorAgentsSkillDirs } from "../src/core/package-manager.ts";
 import { DefaultResourceLoader, loadProjectContextFiles } from "../src/core/resource-loader.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -1117,5 +1118,177 @@ export default function(pi: ExtensionAPI) {
 
 			expect(files.map((f) => f.content)).toEqual(["repo instructions", "src instructions"]);
 		});
+	});
+	describe("refreshCwd", () => {
+		let root: string;
+		let aboveRoot: string;
+		let aDir: string;
+		let bDir: string;
+
+		beforeEach(() => {
+			root = join(tempDir, "root");
+			aboveRoot = join(tempDir, "above");
+			aDir = join(root, "a");
+			bDir = join(root, "b");
+			mkdirSync(root, { recursive: true });
+			mkdirSync(aboveRoot, { recursive: true });
+			mkdirSync(aDir, { recursive: true });
+			mkdirSync(bDir, { recursive: true });
+		});
+
+		function writeSkill(dir: string, name: string, desc: string) {
+			const skillDir = join(dir, ".agents", "skills", name);
+			mkdirSync(skillDir, { recursive: true });
+			writeFileSync(
+				join(skillDir, "SKILL.md"),
+				`---
+name: ${name}
+description: ${desc}
+---
+Skill content`,
+			);
+		}
+
+		it("should accumulate context files across refreshCwd calls", async () => {
+			writeFileSync(join(root, "AGENTS.md"), "root instructions");
+			writeFileSync(join(aDir, "AGENTS.md"), "a instructions");
+			writeFileSync(join(bDir, "AGENTS.md"), "b instructions");
+
+			const loader = new DefaultResourceLoader({ cwd: root, agentDir });
+			await loader.reload();
+
+			loader.refreshCwd(aDir);
+			loader.refreshCwd(bDir);
+
+			const { agentsFiles } = loader.getAgentsFiles();
+			expect(agentsFiles.map((f) => f.content)).toEqual(["root instructions", "a instructions", "b instructions"]);
+		});
+
+		it("should dedup by realpath keeping original position", async () => {
+			writeFileSync(join(root, "AGENTS.md"), "root instructions");
+			writeFileSync(join(aDir, "AGENTS.md"), "a instructions");
+
+			const loader = new DefaultResourceLoader({ cwd: root, agentDir });
+			await loader.reload();
+
+			loader.refreshCwd(aDir);
+			loader.refreshCwd(root);
+			loader.refreshCwd(aDir);
+
+			const { agentsFiles } = loader.getAgentsFiles();
+			expect(agentsFiles.map((f) => f.content)).toEqual(["root instructions", "a instructions"]);
+			expect(agentsFiles.find((f) => f.content === "a instructions")?.path).toBe(join(aDir, "AGENTS.md"));
+		});
+
+		it("should dedup a symlinked context file across refreshCwd dirs", async () => {
+			writeFileSync(join(aDir, "AGENTS.md"), "a instructions");
+			symlinkSync(join(aDir, "AGENTS.md"), join(bDir, "CLAUDE.md"));
+
+			const loader = new DefaultResourceLoader({ cwd: aDir, agentDir });
+			await loader.reload();
+			loader.refreshCwd(bDir);
+
+			const { agentsFiles } = loader.getAgentsFiles();
+			expect(agentsFiles).toHaveLength(1);
+			expect(agentsFiles[0].content).toBe("a instructions");
+			expect(agentsFiles[0].path).toBe(join(aDir, "AGENTS.md"));
+		});
+
+		it("should not load context files above jailRoot", async () => {
+			writeFileSync(join(aboveRoot, "AGENTS.md"), "above-root instructions");
+			writeFileSync(join(root, "AGENTS.md"), "root instructions");
+			writeFileSync(join(aDir, "AGENTS.md"), "a instructions");
+
+			const loader = new DefaultResourceLoader({ cwd: root, agentDir, jailRoot: root });
+			await loader.reload();
+			loader.refreshCwd(aDir);
+
+			const { agentsFiles } = loader.getAgentsFiles();
+			expect(agentsFiles.some((f) => f.content === "above-root instructions")).toBe(false);
+			expect(agentsFiles.map((f) => f.content)).toEqual(["root instructions", "a instructions"]);
+		});
+
+		it("should jail-bound startup skill discovery at the initial reload", async () => {
+			writeSkill(tempDir, "above-skill", "Above skill");
+			writeSkill(root, "root-skill", "Root skill");
+
+			const loader = new DefaultResourceLoader({ cwd: aDir, agentDir, jailRoot: root });
+			await loader.reload();
+
+			const { skills } = loader.getSkills();
+			expect(skills.some((s) => s.name === "root-skill")).toBe(true);
+			expect(skills.some((s) => s.name === "above-skill")).toBe(false);
+		});
+
+		it("should accumulate skills across refreshCwd calls", async () => {
+			writeSkill(aDir, "a-skill", "A skill");
+			writeSkill(bDir, "b-skill", "B skill");
+
+			const loader = new DefaultResourceLoader({ cwd: root, agentDir });
+			await loader.reload();
+
+			loader.refreshCwd(aDir);
+			loader.refreshCwd(bDir);
+
+			const { skills } = loader.getSkills();
+			expect(skills.map((s) => s.name).sort()).toEqual(["a-skill", "b-skill"]);
+		});
+
+		it("should dedup skills by realpath keeping original position", async () => {
+			writeSkill(aDir, "a-skill", "A skill");
+
+			const loader = new DefaultResourceLoader({ cwd: root, agentDir });
+			await loader.reload();
+
+			loader.refreshCwd(aDir);
+			loader.refreshCwd(root);
+			loader.refreshCwd(aDir);
+
+			const { skills } = loader.getSkills();
+			expect(skills).toHaveLength(1);
+			expect(skills[0].name).toBe("a-skill");
+			expect(skills[0].filePath).toBe(join(aDir, ".agents", "skills", "a-skill", "SKILL.md"));
+		});
+	});
+});
+
+describe("symlinked jail bound", () => {
+	let baseDir: string;
+	let ancestor: string;
+	let jail: string;
+	let startLink: string;
+	let agentDir: string;
+
+	beforeEach(() => {
+		baseDir = realpathSync(mkdtempSync(join(tmpdir(), "rl-symlink-jail-")));
+		ancestor = join(baseDir, "ancestor");
+		jail = join(ancestor, "jail");
+		agentDir = join(baseDir, "agent");
+		startLink = join(ancestor, "link");
+		mkdirSync(jail, { recursive: true });
+		mkdirSync(agentDir, { recursive: true });
+		// Symlink the jail from the ancestor so the launch cwd (ancestor/link) reaches the
+		// jail through the symlink: resolve keeps the symlink while realpath does not.
+		symlinkSync(jail, startLink, "dir");
+	});
+
+	afterEach(() => {
+		rmSync(baseDir, { recursive: true, force: true });
+	});
+
+	it("should not load context files above a symlinked jail root", () => {
+		writeFileSync(join(jail, "AGENTS.md"), "INJAIL content");
+		writeFileSync(join(ancestor, "AGENTS.md"), "ABOVE content");
+
+		const files = loadProjectContextFiles({ cwd: startLink, agentDir, jailRoot: jail });
+		const contents = files.map((f) => f.content);
+		expect(contents).toContain("INJAIL content");
+		expect(contents).not.toContain("ABOVE content");
+	});
+
+	it("should not discover skills above a symlinked jail root", () => {
+		const dirs = collectAncestorAgentsSkillDirs(startLink, jail);
+		expect(dirs).toContain(join(startLink, ".agents", "skills"));
+		expect(dirs).not.toContain(join(ancestor, ".agents", "skills"));
 	});
 });

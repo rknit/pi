@@ -131,6 +131,7 @@ interface PackageManagerOptions {
 	cwd: string;
 	agentDir: string;
 	settingsManager: SettingsManager;
+	jailRoot?: string;
 }
 
 type SourceScope = "user" | "project" | "temporary";
@@ -218,7 +219,7 @@ function toPosixPath(p: string): string {
 	return p.split(sep).join("/");
 }
 
-function getHomeDir(): string {
+export function getHomeDir(): string {
 	return process.env.HOME || homedir();
 }
 
@@ -459,15 +460,19 @@ function findGitRepoRoot(startDir: string): string | null {
 	}
 }
 
-function collectAncestorAgentsSkillDirs(startDir: string): string[] {
+export function collectAncestorAgentsSkillDirs(startDir: string, jailRoot?: string): string[] {
 	const skillDirs: string[] = [];
 	const resolvedStartDir = resolve(startDir);
 	const gitRepoRoot = findGitRepoRoot(resolvedStartDir);
+	const resolvedJailRoot = jailRoot ? resolve(jailRoot) : undefined;
 
 	let dir = resolvedStartDir;
 	while (true) {
 		skillDirs.push(join(dir, ".agents", "skills"));
 		if (gitRepoRoot && dir === gitRepoRoot) {
+			break;
+		}
+		if (resolvedJailRoot && canonicalizePath(dir) === canonicalizePath(resolvedJailRoot)) {
 			break;
 		}
 		const parent = dirname(dir);
@@ -810,11 +815,17 @@ export class DefaultPackageManager implements PackageManager {
 	private globalNpmRoot: string | undefined;
 	private globalNpmRootCommandKey: string | undefined;
 	private progressCallback: ProgressCallback | undefined;
+	private jailRoot: string | undefined;
 
 	constructor(options: PackageManagerOptions) {
 		this.cwd = resolvePath(options.cwd);
 		this.agentDir = resolvePath(options.agentDir);
 		this.settingsManager = options.settingsManager;
+		this.jailRoot = options.jailRoot ? resolvePath(options.jailRoot) : undefined;
+	}
+
+	setCwd(newCwd: string): void {
+		this.cwd = resolvePath(newCwd);
 	}
 
 	setProgressCallback(callback: ProgressCallback | undefined): void {
@@ -2397,7 +2408,9 @@ export class DefaultPackageManager implements PackageManager {
 		const userAgentsSkillsDir = join(getHomeDir(), ".agents", "skills");
 		const projectTrusted = this.settingsManager.isProjectTrusted();
 		const projectAgentsSkillDirs = projectTrusted
-			? collectAncestorAgentsSkillDirs(this.cwd).filter((dir) => resolve(dir) !== resolve(userAgentsSkillsDir))
+			? collectAncestorAgentsSkillDirs(this.cwd, this.jailRoot).filter(
+					(dir) => resolve(dir) !== resolve(userAgentsSkillsDir),
+				)
 			: [];
 
 		const addResources = (

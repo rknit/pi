@@ -18,12 +18,18 @@ import {
 } from "./extensions/loader.ts";
 import type { Extension, ExtensionRuntime, InlineExtension, LoadExtensionsResult } from "./extensions/types.ts";
 import { findGitPaths } from "./footer-data-provider.ts";
-import { DefaultPackageManager, type PathMetadata, type ResolvedResource } from "./package-manager.ts";
+import {
+	collectAncestorAgentsSkillDirs,
+	DefaultPackageManager,
+	getHomeDir,
+	type PathMetadata,
+	type ResolvedResource,
+} from "./package-manager.ts";
 import type { PromptTemplate } from "./prompt-templates.ts";
 import { loadPromptTemplates } from "./prompt-templates.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import type { Skill } from "./skills.ts";
-import { loadSkills } from "./skills.ts";
+import { loadSkills, loadSkillsFromDir } from "./skills.ts";
 import { createSourceInfo, type SourceInfo } from "./source-info.ts";
 import { resetTimings } from "./timings.ts";
 
@@ -49,6 +55,7 @@ export interface ResourceLoader {
 	getAppendSystemPromptSources(): Array<{ path: string }>;
 	extendResources(paths: ResourceExtensionPaths): void;
 	reload(options?: ResourceLoaderReloadOptions): Promise<void>;
+	refreshCwd?: (newCwd: string) => void;
 }
 
 function resolvePromptInput(input: string | undefined, description: string): string | undefined {
@@ -119,9 +126,11 @@ function findShadowedContextFile(cwd: string): string | undefined {
 export function loadProjectContextFiles(options: {
 	cwd: string;
 	agentDir: string;
+	jailRoot?: string;
 }): Array<{ path: string; content: string }> {
 	const resolvedCwd = resolvePath(options.cwd);
 	const resolvedAgentDir = resolvePath(options.agentDir);
+	const resolvedJailRoot = options.jailRoot ? resolvePath(options.jailRoot) : undefined;
 
 	const contextFiles: Array<{ path: string; content: string }> = [];
 	const seenPaths = new Set<string>();
@@ -146,6 +155,7 @@ export function loadProjectContextFiles(options: {
 			seenPaths.add(contextFile.path);
 		}
 
+		if (resolvedJailRoot && canonicalizePath(currentDir) === canonicalizePath(resolvedJailRoot)) break;
 		const parentDir = dirname(currentDir);
 		if (parentDir === currentDir) break;
 		currentDir = parentDir;
@@ -171,6 +181,7 @@ export interface DefaultResourceLoaderOptions {
 	noPromptTemplates?: boolean;
 	noThemes?: boolean;
 	noContextFiles?: boolean;
+	jailRoot?: string;
 	systemPrompt?: string;
 	appendSystemPrompt?: string[];
 	extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
@@ -209,6 +220,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private noPromptTemplates: boolean;
 	private noThemes: boolean;
 	private noContextFiles: boolean;
+	private jailRoot: string | undefined;
 	private systemPromptSource?: string;
 	private appendSystemPromptSource?: string[];
 	private extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
@@ -256,10 +268,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.agentDir = resolvePath(options.agentDir);
 		this.settingsManager = options.settingsManager ?? SettingsManager.create(this.cwd, this.agentDir);
 		this.eventBus = options.eventBus ?? createEventBus();
+		this.jailRoot = options.jailRoot ? resolvePath(options.jailRoot) : undefined;
 		this.packageManager = new DefaultPackageManager({
 			cwd: this.cwd,
 			agentDir: this.agentDir,
 			settingsManager: this.settingsManager,
+			jailRoot: this.jailRoot,
 		});
 		this.additionalExtensionPaths = options.additionalExtensionPaths ?? [];
 		this.additionalSkillPaths = options.additionalSkillPaths ?? [];
@@ -518,6 +532,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 				: loadProjectContextFiles({
 						cwd: this.cwd,
 						agentDir: this.agentDir,
+						jailRoot: this.jailRoot,
 					}),
 		};
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
@@ -544,6 +559,55 @@ export class DefaultResourceLoader implements ResourceLoader {
 			.filter((source) => existsSync(source))
 			.map((source) => resolvePath(source));
 		this.loaded = true;
+	}
+
+	refreshCwd(newCwd: string): void {
+		const resolvedNewCwd = resolvePath(newCwd);
+		this.cwd = resolvedNewCwd;
+		this.packageManager.setCwd(resolvedNewCwd);
+
+		if (!this.noContextFiles) {
+			const newFiles = loadProjectContextFiles({
+				cwd: resolvedNewCwd,
+				agentDir: this.agentDir,
+				jailRoot: this.jailRoot,
+			});
+			const seenPaths = new Set(this.agentsFiles.map((f) => canonicalizePath(f.path)));
+			for (const file of newFiles) {
+				const key = canonicalizePath(file.path);
+				if (!seenPaths.has(key)) {
+					seenPaths.add(key);
+					this.agentsFiles.push(file);
+				}
+			}
+		}
+
+		if (!this.noSkills && this.settingsManager.isProjectTrusted()) {
+			const userAgentsSkillsDir = join(getHomeDir(), ".agents", "skills");
+			const newSkillDirs = collectAncestorAgentsSkillDirs(resolvedNewCwd, this.jailRoot).filter(
+				(dir) => resolve(dir) !== resolve(userAgentsSkillsDir),
+			);
+			const seenSkillPaths = new Set(this.skills.map((s) => canonicalizePath(s.filePath)));
+			for (const dir of newSkillDirs) {
+				const result = loadSkillsFromDir({ dir, source: "auto" });
+				for (const skill of result.skills) {
+					const key = canonicalizePath(skill.filePath);
+					if (!seenSkillPaths.has(key)) {
+						seenSkillPaths.add(key);
+						this.skills.push({
+							...skill,
+							sourceInfo: {
+								path: skill.filePath,
+								source: "auto",
+								scope: "project",
+								origin: "top-level",
+								baseDir: skill.baseDir,
+							},
+						});
+					}
+				}
+			}
+		}
 	}
 
 	private async loadCurrentExtensionSet(options: { includeInlineFactories: boolean }): Promise<LoadExtensionsResult> {

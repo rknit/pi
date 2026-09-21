@@ -7,6 +7,7 @@ import { processImage } from "../../utils/image-process.ts";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.ts";
 import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
+import { type CwdSource, resolveCwdSource } from "./cwd-source.ts";
 import { resolveReadPathAsync } from "./path-utils.ts";
 import { readRenderers } from "./renderers/read.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -63,7 +64,7 @@ function getNonVisionImageNote(model: Model<Api> | undefined): string | undefine
 }
 
 export function createReadToolDefinition(
-	cwd: string,
+	cwd: CwdSource,
 	options?: ReadToolOptions,
 ): ToolDefinition<typeof readSchema, ReadToolDetails | undefined> {
 	const autoResizeImages = options?.autoResizeImages ?? true;
@@ -98,7 +99,7 @@ export function createReadToolDefinition(
 
 					(async () => {
 						try {
-							const absolutePath = await resolveReadPathAsync(path, ctx?.cwd || cwd);
+							const absolutePath = await resolveReadPathAsync(path, ctx?.cwd || resolveCwdSource(cwd));
 							if (aborted) return;
 							// Check if file exists and is readable.
 							await ops.access(absolutePath);
@@ -193,6 +194,6 @@ export function createReadToolDefinition(
 	};
 }
 
-export function createReadTool(cwd: string, options?: ReadToolOptions): AgentTool<typeof readSchema> {
+export function createReadTool(cwd: CwdSource, options?: ReadToolOptions): AgentTool<typeof readSchema> {
 	return wrapToolDefinition(createReadToolDefinition(cwd, options));
 }

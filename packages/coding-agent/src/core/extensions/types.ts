@@ -889,6 +889,7 @@ export type InputEventResult =
 interface ToolCallEventBase {
 	type: "tool_call";
 	toolCallId: string;
+	cwd: string;
 }
 
 export interface BashToolCallEvent extends ToolCallEventBase {

@@ -109,6 +109,7 @@ import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
+import { createCdToolDefinition } from "./tools/cd.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
@@ -202,6 +203,8 @@ export interface AgentSessionConfig {
 	sessionManager: SessionManager;
 	settingsManager: SettingsManager;
 	cwd: string;
+	/** Jail root that confines working-directory changes (cd tool, context-file accumulation). */
+	jailRoot?: string;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
@@ -354,6 +357,7 @@ export class AgentSession {
 	private _customTools: ToolDefinition[];
 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
 	private _cwd: string;
+	private _jailRoot?: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
 	private _allowedToolNames?: Set<string>;
@@ -389,6 +393,7 @@ export class AgentSession {
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
+		this._jailRoot = config.jailRoot;
 		this._modelRuntime = config.modelRuntime;
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
@@ -496,6 +501,7 @@ export class AgentSession {
 					toolName: toolCall.name,
 					toolCallId: toolCall.id,
 					input: args as Record<string, unknown>,
+					cwd: this._cwd,
 				});
 			} catch (err) {
 				if (err instanceof Error) {
@@ -1031,6 +1037,20 @@ export class AgentSession {
 	/** Update scoped models for cycling */
 	setScopedModels(scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>): void {
 		this._scopedModels = scopedModels;
+	}
+
+	get cwd(): string {
+		return this._cwd;
+	}
+
+	/** Change the working directory. Tools read the value live at execution, so this redirects every subsequent tool call. */
+	setCwd(cwd: string): void {
+		this._cwd = cwd;
+		this._extensionRunner.setCwd(cwd);
+		this._resourceLoader.refreshCwd?.(cwd);
+		const rebuilt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this._baseSystemPrompt = rebuilt;
+		this.agent.state.systemPrompt = this._systemPromptOverride ?? rebuilt;
 	}
 
 	/** File-based prompt templates */
@@ -2677,12 +2697,24 @@ export class AgentSession {
 			(!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
+		const jailRoot = this._jailRoot;
+		const cdEntry = jailRoot
+			? {
+					definition: createCdToolDefinition({
+						getCwd: () => this._cwd,
+						setCwd: (dir: string) => this.setCwd(dir),
+						jailRoot,
+					}) as ToolDefinition<any, any, any>,
+					sourceInfo: createSyntheticSourceInfo("<builtin:cd>", { source: "builtin" }),
+				}
+			: undefined;
 		const allCustomTools = [
 			...registeredTools,
 			...this._customTools.map((definition) => ({
 				definition,
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
 			})),
+			...(cdEntry ? [cdEntry] : []),
 		].filter((tool) => isAllowedTool(tool.definition.name));
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
 			Array.from(this._baseToolDefinitions.entries())
@@ -2758,6 +2790,9 @@ export class AgentSession {
 			}
 		}
 
+		if (jailRoot && isAllowedTool("cd") && !nextActiveToolNames.includes("cd")) {
+			nextActiveToolNames.push("cd");
+		}
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
 	}
 
@@ -2776,7 +2811,7 @@ export class AgentSession {
 						createToolDefinitionFromAgentTool(tool),
 					]),
 				)
-			: createAllToolDefinitions(this._cwd, {
+			: createAllToolDefinitions(() => this._cwd, {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
 				});

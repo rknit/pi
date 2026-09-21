@@ -4,6 +4,7 @@ import { dirname } from "path";
 import { type Static, Type } from "typebox";
 import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
+import { type CwdSource, resolveCwdSource } from "./cwd-source.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { writeRenderers } from "./renderers/write.ts";
@@ -43,7 +44,7 @@ export interface WriteToolOptions {
 }
 
 export function createWriteToolDefinition(
-	cwd: string,
+	cwd: CwdSource,
 	options?: WriteToolOptions,
 ): ToolDefinition<typeof writeSchema, undefined> {
 	const ops = options?.operations ?? defaultWriteOperations;
@@ -63,7 +64,7 @@ export function createWriteToolDefinition(
 			_onUpdate?,
 			ctx?: ExtensionContext,
 		) {
-			const absolutePath = resolveToCwd(path, ctx?.cwd || cwd);
+			const absolutePath = resolveToCwd(path, ctx?.cwd || resolveCwdSource(cwd));
 			const dir = dirname(absolutePath);
 			return withFileMutationQueue(absolutePath, async () => {
 				// Do not reject from an abort event listener here: that would release the
@@ -93,6 +94,6 @@ export function createWriteToolDefinition(
 	};
 }
 
-export function createWriteTool(cwd: string, options?: WriteToolOptions): AgentTool<typeof writeSchema> {
+export function createWriteTool(cwd: CwdSource, options?: WriteToolOptions): AgentTool<typeof writeSchema> {
 	return wrapToolDefinition(createWriteToolDefinition(cwd, options));
 }

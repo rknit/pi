@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/pi-ai/compat";
 import { getAgentDir } from "../config.ts";
-import { resolvePath } from "../utils/paths.ts";
+import { canonicalizePath, resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
@@ -41,6 +41,9 @@ export interface CreateAgentSessionOptions {
 	cwd?: string;
 	/** Global config directory. Default: ~/.pi/agent */
 	agentDir?: string;
+
+	/** Jail root that confines the cd tool and context-file accumulation. Default: canonicalized startup cwd. */
+	jailRoot?: string;
 
 	/** Canonical model/auth runtime. Defaults to a runtime using agentDir/auth.json and models.json. */
 	modelRuntime?: ModelRuntime;
@@ -172,6 +175,7 @@ function getDefaultAgentDir(): string {
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
+	const jailRoot = options.jailRoot ?? canonicalizePath(cwd);
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	let resourceLoader = options.resourceLoader;
 
@@ -183,7 +187,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
 
 	if (!resourceLoader) {
-		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
+		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager, jailRoot });
 		await resourceLoader.reload();
 		time("resourceLoader.reload");
 	}
@@ -390,6 +394,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		sessionManager,
 		settingsManager,
 		cwd,
+		jailRoot,
 		scopedModels: options.scopedModels,
 		resourceLoader,
 		customTools: options.customTools,

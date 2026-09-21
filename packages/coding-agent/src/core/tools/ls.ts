@@ -3,6 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import nodePath from "path";
 import { type Static, Type } from "typebox";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
+import { type CwdSource, resolveCwdSource } from "./cwd-source.ts";
 import { pathExists, resolveToCwd } from "./path-utils.ts";
 import { lsRenderers } from "./renderers/ls.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -52,7 +53,7 @@ export interface LsToolOptions {
 }
 
 export function createLsToolDefinition(
-	cwd: string,
+	cwd: CwdSource,
 	options?: LsToolOptions,
 ): ToolDefinition<typeof lsSchema, LsToolDetails | undefined> {
 	const ops = options?.operations ?? defaultLsOperations;
@@ -80,7 +81,7 @@ export function createLsToolDefinition(
 
 				(async () => {
 					try {
-						const dirPath = resolveToCwd(path || ".", ctx?.cwd || cwd);
+						const dirPath = resolveToCwd(path || ".", ctx?.cwd || resolveCwdSource(cwd));
 						const effectiveLimit = limit ?? DEFAULT_LIMIT;
 
 						// Check if path exists.
@@ -170,6 +171,6 @@ export function createLsToolDefinition(
 	};
 }
 
-export function createLsTool(cwd: string, options?: LsToolOptions): AgentTool<typeof lsSchema> {
+export function createLsTool(cwd: CwdSource, options?: LsToolOptions): AgentTool<typeof lsSchema> {
 	return wrapToolDefinition(createLsToolDefinition(cwd, options));
 }

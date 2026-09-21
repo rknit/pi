@@ -11,6 +11,7 @@ import {
 	createShellToolDefinition,
 	type ShellToolConfig,
 } from "./bash.ts";
+import type { CwdSource } from "./cwd-source.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
 const UTF8_OUTPUT_PREFIX = "try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}\n";
@@ -47,7 +48,7 @@ const powershellToolConfig: ShellToolConfig = {
 };
 
 export function createPowerShellToolDefinition(
-	cwd: string,
+	cwd: CwdSource,
 	options?: PowerShellToolOptions,
 ): ReturnType<typeof createShellToolDefinition> {
 	return createShellToolDefinition(cwd, powershellToolConfig, {
@@ -56,7 +57,10 @@ export function createPowerShellToolDefinition(
 	});
 }
 
-export function createPowerShellTool(cwd: string, options?: PowerShellToolOptions): ReturnType<typeof createBashTool> {
+export function createPowerShellTool(
+	cwd: CwdSource,
+	options?: PowerShellToolOptions,
+): ReturnType<typeof createBashTool> {
 	const definition = createPowerShellToolDefinition(cwd, options);
 	const tool = wrapToolDefinition(definition);
 	Object.assign(tool, {

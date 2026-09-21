@@ -5,6 +5,7 @@ import path from "path";
 import { type Static, Type } from "typebox";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
+import { type CwdSource, resolveCwdSource } from "./cwd-source.ts";
 import { pathExists, resolveToCwd } from "./path-utils.ts";
 import { findRenderers } from "./renderers/find.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -68,7 +69,7 @@ export interface FindToolOptions {
 }
 
 export function createFindToolDefinition(
-	cwd: string,
+	cwd: CwdSource,
 	options?: FindToolOptions,
 ): ToolDefinition<typeof findSchema, FindToolDetails | undefined> {
 	const customOps = options?.operations;
@@ -108,7 +109,7 @@ export function createFindToolDefinition(
 
 				(async () => {
 					try {
-						const searchPath = resolveToCwd(searchDir || ".", ctx?.cwd || cwd);
+						const searchPath = resolveToCwd(searchDir || ".", ctx?.cwd || resolveCwdSource(cwd));
 						const effectiveLimit = limit ?? DEFAULT_LIMIT;
 						const ops = customOps ?? defaultFindOperations;
 
@@ -313,6 +314,6 @@ export function createFindToolDefinition(
 	};
 }
 
-export function createFindTool(cwd: string, options?: FindToolOptions): AgentTool<typeof findSchema> {
+export function createFindTool(cwd: CwdSource, options?: FindToolOptions): AgentTool<typeof findSchema> {
 	return wrapToolDefinition(createFindToolDefinition(cwd, options));
 }

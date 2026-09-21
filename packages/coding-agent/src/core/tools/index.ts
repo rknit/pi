@@ -9,6 +9,7 @@ export {
 	createBashToolDefinition,
 	createLocalBashOperations,
 } from "./bash.ts";
+export { type CwdSource, resolveCwdSource } from "./cwd-source.ts";
 export {
 	createEditTool,
 	createEditToolDefinition,
@@ -71,6 +72,9 @@ export {
 	truncateLine,
 	truncateTail,
 } from "./truncate.ts";
+
+import type { CwdSource } from "./cwd-source.ts";
+
 export {
 	createWriteTool,
 	createWriteToolDefinition,
@@ -115,7 +119,7 @@ export interface ToolsOptions {
 	ls?: LsToolOptions;
 }
 
-export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
+export function createToolDefinition(toolName: ToolName, cwd: CwdSource, options?: ToolsOptions): ToolDef {
 	switch (toolName) {
 		case "read":
 			return createReadToolDefinition(cwd, options?.read);
@@ -138,7 +142,7 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 	}
 }
 
-export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptions): Tool {
+export function createTool(toolName: ToolName, cwd: CwdSource, options?: ToolsOptions): Tool {
 	switch (toolName) {
 		case "read":
 			return createReadTool(cwd, options?.read);
@@ -161,7 +165,7 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 	}
 }
 
-export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
+export function createCodingToolDefinitions(cwd: CwdSource, options?: ToolsOptions): ToolDef[] {
 	return [
 		createReadToolDefinition(cwd, options?.read),
 		createBashToolDefinition(cwd, options?.bash),
@@ -170,7 +174,7 @@ export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions)
 	];
 }
 
-export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
+export function createReadOnlyToolDefinitions(cwd: CwdSource, options?: ToolsOptions): ToolDef[] {
 	return [
 		createReadToolDefinition(cwd, options?.read),
 		createGrepToolDefinition(cwd, options?.grep),
@@ -179,7 +183,7 @@ export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOption
 	];
 }
 
-export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
+export function createAllToolDefinitions(cwd: CwdSource, options?: ToolsOptions): Record<ToolName, ToolDef> {
 	return {
 		read: createReadToolDefinition(cwd, options?.read),
 		bash: createBashToolDefinition(cwd, options?.bash),
@@ -192,7 +196,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 	};
 }
 
-export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
+export function createCodingTools(cwd: CwdSource, options?: ToolsOptions): Tool[] {
 	return [
 		createReadTool(cwd, options?.read),
 		createBashTool(cwd, options?.bash),
@@ -201,7 +205,7 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 	];
 }
 
-export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[] {
+export function createReadOnlyTools(cwd: CwdSource, options?: ToolsOptions): Tool[] {
 	return [
 		createReadTool(cwd, options?.read),
 		createGrepTool(cwd, options?.grep),
@@ -210,7 +214,7 @@ export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[]
 	];
 }
 
-export function createAllTools(cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
+export function createAllTools(cwd: CwdSource, options?: ToolsOptions): Record<ToolName, Tool> {
 	return {
 		read: createReadTool(cwd, options?.read),
 		bash: createBashTool(cwd, options?.bash),

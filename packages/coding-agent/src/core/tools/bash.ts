@@ -14,6 +14,7 @@ import {
 } from "../../utils/shell.ts";
 import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
+import { type CwdSource, resolveCwdSource } from "./cwd-source.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
 import { BASH_UPDATE_THROTTLE_MS, createShellRenderers } from "./renderers/bash.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -221,7 +222,7 @@ export interface ShellToolConfig {
 }
 
 export function createShellToolDefinition(
-	cwd: string,
+	cwd: CwdSource,
 	config: ShellToolConfig,
 	options?: BashToolOptions,
 ): ToolDefinition<typeof bashSchema, BashToolDetails | undefined, BashRenderState> {
@@ -247,7 +248,7 @@ export function createShellToolDefinition(
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
 			const spawnContext = resolveSpawnContext(
 				resolvedCommand,
-				ctx?.cwd || cwd,
+				ctx?.cwd || resolveCwdSource(cwd),
 				spawnHook,
 				exposeSessionEnvironment,
 				ctx,
@@ -384,13 +385,13 @@ const bashToolConfig: ShellToolConfig = {
 };
 
 export function createBashToolDefinition(
-	cwd: string,
+	cwd: CwdSource,
 	options?: BashToolOptions,
 ): ToolDefinition<typeof bashSchema, BashToolDetails | undefined, BashRenderState> {
 	return createShellToolDefinition(cwd, bashToolConfig, options);
 }
 
-export function createBashTool(cwd: string, options?: BashToolOptions): AgentTool<typeof bashSchema> {
+export function createBashTool(cwd: CwdSource, options?: BashToolOptions): AgentTool<typeof bashSchema> {
 	const definition = createBashToolDefinition(cwd, options);
 	const tool = wrapToolDefinition(definition);
 	Object.assign(tool, {

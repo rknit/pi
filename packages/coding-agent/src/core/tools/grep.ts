@@ -6,6 +6,7 @@ import path from "path";
 import { type Static, Type } from "typebox";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
+import { type CwdSource, resolveCwdSource } from "./cwd-source.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { grepRenderers } from "./renderers/grep.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -68,7 +69,7 @@ export interface GrepToolOptions {
 }
 
 export function createGrepToolDefinition(
-	cwd: string,
+	cwd: CwdSource,
 	options?: GrepToolOptions,
 ): ToolDefinition<typeof grepSchema, GrepToolDetails | undefined> {
 	const customOps = options?.operations;
@@ -122,7 +123,7 @@ export function createGrepToolDefinition(
 							return;
 						}
 
-						const searchPath = resolveToCwd(searchDir || ".", ctx?.cwd || cwd);
+						const searchPath = resolveToCwd(searchDir || ".", ctx?.cwd || resolveCwdSource(cwd));
 						const ops = customOps ?? defaultGrepOperations;
 						let isDirectory: boolean;
 						try {
@@ -318,6 +319,6 @@ export function createGrepToolDefinition(
 	};
 }
 
-export function createGrepTool(cwd: string, options?: GrepToolOptions): AgentTool<typeof grepSchema> {
+export function createGrepTool(cwd: CwdSource, options?: GrepToolOptions): AgentTool<typeof grepSchema> {
 	return wrapToolDefinition(createGrepToolDefinition(cwd, options));
 }
