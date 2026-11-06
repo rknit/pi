@@ -580,6 +580,7 @@ type ExecutedToolCallOutcome = {
 
 type FinalizedToolCallOutcome = {
 	toolCall: AgentToolCall;
+	args?: unknown;
 	result: AgentToolResult<any>;
 	isError: boolean;
 };
@@ -759,6 +760,7 @@ async function finalizeExecutedToolCall(
 
 	return {
 		toolCall: prepared.toolCall,
+		args: prepared.args,
 		result,
 		isError,
 	};
@@ -776,6 +778,7 @@ async function emitToolExecutionEnd(finalized: FinalizedToolCallOutcome, emit: A
 		type: "tool_execution_end",
 		toolCallId: finalized.toolCall.id,
 		toolName: finalized.toolCall.name,
+		...(finalized.args === undefined ? {} : { args: finalized.args }),
 		result: finalized.result,
 		isError: finalized.isError,
 	});

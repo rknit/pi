@@ -441,6 +441,52 @@ describe("agentLoop with AgentMessage", () => {
 		expect(messages[messages.length - 1].role).toBe("assistant");
 	});
 
+	it("should report the args the tool ran with on tool_execution_end and keep the message's args", async () => {
+		const toolSchema = Type.Object({ value: Type.String(), timeout: Type.Optional(Type.Number()) });
+		const tool: AgentTool<typeof toolSchema, Record<string, never>> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			async execute() {
+				return { content: [{ type: "text", text: "ok" }], details: {} };
+			},
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [tool] };
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			beforeToolCall: async ({ args }) => {
+				(args as { timeout?: number }).timeout = 600;
+				return undefined;
+			},
+		};
+		const toolCall = { type: "toolCall" as const, id: "tool-1", name: "echo", arguments: { value: "hi" } };
+		let callIndex = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				const message =
+					callIndex === 0
+						? createAssistantMessage([toolCall], "toolUse")
+						: createAssistantMessage([{ type: "text", text: "done" }]);
+				stream.push({ type: "done", reason: callIndex === 0 ? "toolUse" : "stop", message });
+				callIndex++;
+			});
+			return stream;
+		};
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("go")], context, config, undefined, streamFn);
+		for await (const event of stream) {
+			events.push(event);
+		}
+		const start = events.find((e) => e.type === "tool_execution_start");
+		const end = events.find((e) => e.type === "tool_execution_end");
+		expect(start?.type === "tool_execution_start" && start.args).toEqual({ value: "hi" });
+		expect(end?.type === "tool_execution_end" && end.args).toEqual({ value: "hi", timeout: 600 });
+		expect(toolCall.arguments).toEqual({ value: "hi" });
+	});
+
 	it("should execute mutated beforeToolCall args without revalidation", async () => {
 		const toolSchema = Type.Object({ value: Type.String() });
 		const executed: Array<string | number> = [];
